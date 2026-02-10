@@ -1,0 +1,8 @@
+https://github.com/svaante/dape?tab=readme-ov-file#
+
+https://lldb.llvm.org/use/tutorials/accessing-documentation.html
+
+https://sourceware.org/gdb/current/onlinedocs/gdb.html/Events-In-Python.html#Events-In-Python
+
+https://microsoft.github.io/debug-adapter-protocol/specification
+
