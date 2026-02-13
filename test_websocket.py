@@ -9,13 +9,13 @@ def get_handshake_response(raw_request):
         # Decode and split by lines
         lines = raw_request.decode('utf-8').split('\r\n')
         key = None
-        
+
         for line in lines:
             if line.lower().startswith('sec-websocket-key:'):
                 # Split at colon and strip whitespace/extra chars
                 key = line.split(':', 1)[1].strip()
                 break
-        
+
         if not key:
             return b"HTTP/1.1 400 Bad Request\r\n\r\n"
 
@@ -37,23 +37,65 @@ def get_handshake_response(raw_request):
 def encode_frame(message):
     data = message.encode('utf-8')
     length = len(data)
-    
-    # Byte 1: Fin=1 (0x80), Opcode=1 (Text) -> 0x81
+
     header = bytearray([0x81])
-    
+
     if length <= 125:
         header.append(length)
     elif length <= 65535:
-        # 126 is the signal for a 2-byte extended length
         header.append(126)
-        # Add the length as a 16-bit unsigned integer (big-endian)
         header.extend(length.to_bytes(2, byteorder='big'))
     else:
-        # 127 is the signal for an 8-byte extended length
         header.append(127)
         header.extend(length.to_bytes(8, byteorder='big'))
-        
+
     return bytes(header + data)
+
+state = {
+    "threads": {},      # Key: Thread Num
+    "breakpoints": {}   # Key: Breakpoint Num
+}
+
+def scrape_all_threads():
+    # Get the current inferior (the process)
+    inf = gdb.selected_inferior()
+
+    state["threads"] = {}
+
+    # Iterate through all threads in this process
+    for thread in inf.threads():
+        # Ensure the thread is valid and stopped so we can inspect it
+        if not thread.is_valid():
+            continue
+        try:
+            thread.switch()
+            frame = gdb.newest_frame()
+            sal = frame.find_sal() # Symbol-and-Line
+
+            filename = sal.symtab.fullname() if (sal.symtab and sal.symtab.is_valid()) else "Unknown"
+            line = sal.line
+
+            state["threads"][thread.num] = {
+                "tid": thread.ptid[1], # LWP ID
+                "file": filename,
+                "line": line,
+                "name": thread.name or "Unnamed"
+            }
+        except gdb.error as e:
+            state["threads"][thread.num] = {"error": str(e)}
+
+    return
+
+# Example of how to trigger this safely from a background context
+def safe_scrape():
+    original_thread = gdb.selected_thread()
+
+    try:
+        scrape_all_threads()
+    finally:
+        if original_thread and original_thread.is_valid():
+            original_thread.switch()
+
 
 def start_websock_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -63,7 +105,8 @@ def start_websock_server():
 
     clients = []
     while True:
-        # Accept new connections
+        gdb.post_event(safe_scrape)
+
         try:
             conn, addr = server.accept()
             conn.setblocking(False)
@@ -99,24 +142,15 @@ def start_websock_server():
 
         time.sleep(0.05)
 
-        Inf = gdb.selected_inferior()
-        threads = Inf.threads()
-        for thread in threads[:]:
-            print(thread.name)
-
 
 # Global event buffer
 
-state = {
-    "threads": {},      # Key: Thread Num
-    "breakpoints": {}   # Key: Breakpoint Num
-}
+#state = {
+#    "threads": {},      # Key: Thread Num
+#    "breakpoints": {}   # Key: Breakpoint Num
+#}
 
 # --- Event Handlers ---
-
-def update
-
-
 
 #def queue_event(method, params=None):
 #    """Formats and queues a JSON-RPC notification."""
@@ -140,28 +174,26 @@ def update
 #def on_exit(event):
 #    queue_event("terminated", {"exitCode": getattr(event, 'exit_code', 0)})
 
-def get_location(frame):
-    try:
-        sal = frame.find_sal()
-        if not sal.symtab:
-            return None
-        return sal.symtab.fullname() + ':' + sal.line + ':0'
-    except:
-        return None
+#def get_location(frame):
+#    try:
+#        sal = frame.find_sal()
+#        if not sal.symtab:
+#            return None
+#        return sal.symtab.fullname() + ':' + sal.line + ':0'
+#    except:
+#        return None
+#
+#def on_new_thread(event):
+#    return 
 
-def on_new_thread(event):
-    return 
+def on_breakpoint_created():
+    
 
-# --- Registry Function ---
-
-    # Stop/Run events
-#    gdb.events.new_thread.connect(on_new_thread)
-#    gdb.events.stop.connect(on_stop)
-#    gdb.events.cont.connect(on_continue)
-#    gdb.events.exited.connect(on_exit)
+def register_gdb_events():
+    gdb.events.breakpoint_created(on_breakpoint_created)
 
 
 # --- Execution ---
-#register_gdb_events()
+register_gdb_events()
 gdb.Thread(target=start_websock_server, daemon=True).start()
 
