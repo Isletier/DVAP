@@ -51,50 +51,21 @@ def encode_frame(message):
 
     return bytes(header + data)
 
-state = {
-    "threads": {},      # Key: Thread Num
-    "breakpoints": {}   # Key: Breakpoint Num
-}
+def state_to_string():
+    lines = []
 
-def scrape_all_threads():
-    # Get the current inferior (the process)
-    inf = gdb.selected_inferior()
+    for t_num in sorted(state["threads"].keys()):
+        t = state["threads"][t_num]
+        line = f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']}"
+        lines.append(line)
 
-    state["threads"] = {}
 
-    # Iterate through all threads in this process
-    for thread in inf.threads():
-        # Ensure the thread is valid and stopped so we can inspect it
-        if not thread.is_valid():
-            continue
-        try:
-            thread.switch()
-            frame = gdb.newest_frame()
-            sal = frame.find_sal() # Symbol-and-Line
+    for b_num in sorted(state["breakpoints"].keys()):
+        b = state["breakpoints"][b_num]
+        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']}"
+        lines.append(line)
 
-            filename = sal.symtab.fullname() if (sal.symtab and sal.symtab.is_valid()) else "Unknown"
-            line = sal.line
-
-            state["threads"][thread.num] = {
-                "tid": thread.ptid[1], # LWP ID
-                "file": filename,
-                "line": line,
-                "name": thread.name or "Unnamed"
-            }
-        except gdb.error as e:
-            state["threads"][thread.num] = {"error": str(e)}
-
-    return
-
-# Example of how to trigger this safely from a background context
-def safe_scrape():
-    original_thread = gdb.selected_thread()
-
-    try:
-        scrape_all_threads()
-    finally:
-        if original_thread and original_thread.is_valid():
-            original_thread.switch()
+    return "\n".join(lines)
 
 
 def start_websock_server():
@@ -105,8 +76,6 @@ def start_websock_server():
 
     clients = []
     while True:
-        gdb.post_event(safe_scrape)
-
         try:
             conn, addr = server.accept()
             conn.setblocking(False)
@@ -129,7 +98,7 @@ def start_websock_server():
                 clients.remove(c)
                 c.close()
 
-        msg = f"GDB Event: {time.time()}"
+        msg = state_to_string()
         frame = encode_frame(msg)
         for c in clients[:]:
             try:
@@ -143,54 +112,101 @@ def start_websock_server():
         time.sleep(0.05)
 
 
-# Global event buffer
+state = {
+    "threads": {},      # Key: Thread Num
+    "breakpoints": {}   # Key: Breakpoint Num
+}
 
-#state = {
-#    "threads": {},      # Key: Thread Num
-#    "breakpoints": {}   # Key: Breakpoint Num
-#}
+def on_stop(b):
+    raw_output = gdb.execute("thread apply all where 1", to_string=True)
 
-# --- Event Handlers ---
+    current_thread = None
 
-#def queue_event(method, params=None):
-#    """Formats and queues a JSON-RPC notification."""
-#    payload = {
-#        "jsonrpc": "2.0",
-#        "method": method,
-#        "params": params or {}
-#    }
-#    event_buffer.append(payload)
-#
-#def on_stop(event):
-#    reason = "breakpoint" if isinstance(event, gdb.BreakpointEvent) else "signal"
-#    queue_event("stopped", {
-#        "reason": reason,
-#        "threadId": gdb.selected_thread().num if gdb.selected_thread() else None
-#    })
-#
-#def on_continue(event):
-#    queue_event("continued", {"threadId": gdb.selected_thread().num if gdb.selected_thread() else "all"})
-#
-#def on_exit(event):
-#    queue_event("terminated", {"exitCode": getattr(event, 'exit_code', 0)})
+    for line in raw_output.splitlines():
+        line = line.strip()
 
-#def get_location(frame):
-#    try:
-#        sal = frame.find_sal()
-#        if not sal.symtab:
-#            return None
-#        return sal.symtab.fullname() + ':' + sal.line + ':0'
-#    except:
-#        return None
-#
-#def on_new_thread(event):
-#    return 
+        if line.startswith("Thread "):
+            try:
+                parts = line.split()
+                t_num = int(parts[1])
 
-def on_breakpoint_created():
-    
+                lwp_idx = line.find("LWP ")
+                if lwp_idx != -1:
+                    tid_str = line[lwp_idx+4:].split(')')[0]
+                    tid = int(tid_str)
+                else:
+                    tid = 0
+
+                current_thread = t_num
+                state["threads"][current_thread] = {
+                    "file": "",
+                    "line": None,
+                    "tid": tid,
+                }
+            except (ValueError, IndexError):
+                current_thread = None
+            continue
+
+        if current_thread is not None and line.startswith("#0"):
+            at_idx = line.rfind(" at ")
+            if at_idx != -1:
+                location = line[at_idx + 4:].strip()
+                if ":" in location:
+                    file_path, line_num = location.rsplit(":", 1)
+                    state["threads"][current_thread]["file"] = file_path
+                    state["threads"][current_thread]["line"] = line_num
+
+            current_thread = None
+
+    return
+
+def get_source_info(b):
+    if b.type == gdb.BP_WATCHPOINT or b.type == gdb.BP_HARDWARE_WATCHPOINT or b.type == gdb.BP_READ_WATCHPOINT or b.type == gdb.BP_ACCESS_WATCHPOINT:
+        return None, None
+
+    if hasattr(b, 'locations') and b.locations:
+        source = b.locations[0].source
+        if source:
+            return source[0], source[1] # (fullname, line)
+
+    if b.location:
+        try:
+            sals = gdb.decode_line(b.location)[1]
+            if sals and len(sals) > 0:
+                return sals[0].symtab.fullname(), sals[0].line
+        except:
+            pass
+            
+    return "", ""
+
+def on_breakpoint_created(b):
+    file_path, line_num = get_source_info(b)
+
+    is_nonconditional = (b.condition is None and 
+                         b.thread is None and 
+                         getattr(b, 'task', None) is None)
+
+    state["breakpoints"][b.number] = {
+        "file":           file_path,
+        "line":           line_num,
+        "type":           b.type,
+        "location":       b.location if b.location else "",
+        "nonconditional": is_nonconditional,
+        "enabled":        b.enabled
+    }
+
+def on_breakpoint_modified(b):
+    on_breakpoint_created(b)
+
+def on_breakpoint_deleted(b):
+    if b.number in state["breakpoints"]:
+        del state["breakpoints"][b.number]
 
 def register_gdb_events():
-    gdb.events.breakpoint_created(on_breakpoint_created)
+    gdb.events.breakpoint_created.connect(on_breakpoint_created)
+    gdb.events.breakpoint_modified.connect(on_breakpoint_modified)
+    gdb.events.breakpoint_deleted.connect(on_breakpoint_deleted)
+    gdb.events.stop.connect(on_stop)
 
 
 # --- Execution ---
