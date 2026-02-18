@@ -62,7 +62,7 @@ def state_to_string():
 
     for b_num in sorted(state["breakpoints"].keys()):
         b = state["breakpoints"][b_num]
-        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']}"
+        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['nonconditional']}:{b['enabled']}"
         lines.append(line)
 
     return "\n".join(lines)
@@ -105,7 +105,6 @@ def start_websock_server():
                 c.sendall(frame)
             except:
                 print("Client dropped during broadcast.")
-                if c in inputs: inputs.remove(c)
                 clients.remove(c)
                 c.close()
 
@@ -162,7 +161,7 @@ def on_stop(b):
 
 def get_source_info(b):
     if b.type == gdb.BP_WATCHPOINT or b.type == gdb.BP_HARDWARE_WATCHPOINT or b.type == gdb.BP_READ_WATCHPOINT or b.type == gdb.BP_ACCESS_WATCHPOINT:
-        return None, None
+        return "", ""
 
     if hasattr(b, 'locations') and b.locations:
         source = b.locations[0].source
@@ -190,7 +189,6 @@ def on_breakpoint_created(b):
         "file":           file_path,
         "line":           line_num,
         "type":           b.type,
-        "location":       b.location if b.location else "",
         "nonconditional": is_nonconditional,
         "enabled":        b.enabled
     }
