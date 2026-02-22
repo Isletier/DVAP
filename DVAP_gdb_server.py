@@ -105,7 +105,6 @@ def start_websock_server():
                 c.sendall(frame)
             except:
                 print("Client dropped during broadcast.")
-                if c in inputs: inputs.remove(c)
                 clients.remove(c)
                 c.close()
 
