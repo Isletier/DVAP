@@ -85,3 +85,7 @@ https://sourceware.org/gdb/current/onlinedocs/gdb.html/Python-API.html#Python-AP
 
 https://microsoft.github.io/debug-adapter-protocol/specification
 
+Special thanks for Johan and his websocket server, directly embeded in this script:
+
+https://github.com/Pithikos/python-websocket-server/tree/master
+
