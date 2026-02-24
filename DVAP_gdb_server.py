@@ -1,5 +1,4 @@
-# Author: Johan Hanssen Seferidis
-# License: MIT
+
 from hashlib import sha1
 import logging
 from socket import error as SocketError
@@ -10,7 +9,13 @@ from base64 import b64encode
 import errno
 import threading
 from socketserver import ThreadingMixIn, TCPServer, StreamRequestHandler
+import time
 
+
+# ---------------------------------------------------------------------
+# Author: Johan Hanssen Seferidis
+# License: MIT
+# Origin: https://github.com/Pithikos/python-websocket-server/tree/master
 
 class ThreadWithLoggedException(gdb.Thread):
     """
@@ -181,7 +186,7 @@ class WebsocketServer(ThreadingMixIn, TCPServer, API):
             if threaded:
                 self.daemon = True
                 self.thread = WebsocketServerThread(target=super().serve_forever, daemon=True, logger=logger)
-                logger.info(f"Starting {cls_name} on thread {self.thread.getName()}.")
+                logger.info(f"Starting {cls_name} on thread {self.thread.name}.")
                 self.thread.start()
             else:
                 self.thread = threading.current_thread()
@@ -525,9 +530,15 @@ def try_decode_UTF8(data):
         return False
     except Exception as e:
         raise(e)
+#----------------------------------------------------------------------
 
 
-server = WebsocketServer(host='127.0.0.1', port=9000, loglevel=logging.INFO)
+def on_new_client(client, server):
+    server.send_message(client, state_to_string())
+
+server = WebsocketServer(host='127.0.0.1', port=9000, loglevel=logging.ERROR)
+server.set_fn_new_client(on_new_client)
+
 state = {
     "threads": {},      # Key: Thread Num
     "breakpoints": {}   # Key: Breakpoint Num
@@ -549,75 +560,49 @@ def state_to_string():
 
     return "\n".join(lines)
 
-
-
 def on_stop(b):
-#    raw_output = gdb.execute("thread apply all where 1", to_string=True)
-#
-#    current_thread = None
-#
-#    for line in raw_output.splitlines():
-#        line = line.strip()
-#
-#        if line.startswith("Thread "):
-#            try:
-#                parts = line.split()
-#                t_num = int(parts[1])
-#
-#                lwp_idx = line.find("LWP ")
-#                if lwp_idx != -1:
-#                    tid_str = line[lwp_idx+4:].split(')')[0]
-#                    tid = int(tid_str)
-#                else:
-#                    tid = 0
-#
-#                current_thread = t_num
-#                state["threads"][current_thread] = {
-#                    "file": "",
-#                    "line": None,
-#                    "tid": tid,
-#                }
-#            except (ValueError, IndexError):
-#                current_thread = None
-#            continue
-#
-#        if current_thread is not None and line.startswith("#0"):
-#            at_idx = line.rfind(" at ")
-#            if at_idx != -1:
-#                location = line[at_idx + 4:].strip()
-#                if ":" in location:
-#                    file_path, line_num = location.rsplit(":", 1)
-#                    state["threads"][current_thread]["file"] = file_path
-#                    state["threads"][current_thread]["line"] = line_num
-#
-#            current_thread = None
-#
-#    server.send_message_to_all(state_to_string())
-
     inf = gdb.selected_inferior()
+    selected_thread = gdb.selected_thread()
+    state["threads"] = {}
     for thread in inf.threads():
         if not thread.is_valid():
             continue
-            
+
         if thread.is_running():
-            print(f"Thread {thread.num}: [RUNNING] - Сначала остановите поток")
+            state["threads"][thread.num] = {
+                "file": "",
+                "line": None,
+                "tid":  thread.ptid[1]
+            }
+
             continue
 
-        thread.switch()
+        if thread != gdb.selected_thread():
+            thread.switch()
+
         try:
-            # Берем самый верхний фрейм (текущая позиция)
             frame = gdb.selected_frame()
             sal = frame.find_sal()
             
             if sal and sal.symtab:
                 filename = sal.symtab.filename
                 line = sal.line
-                print(f"Thread {thread.num}: {filename}:{line}")
+                state["threads"][thread.num] = {
+                    "file": filename,
+                    "line": line,
+                    "tid":  thread.ptid[1]
+                }
             else:
-                # Если нет отладочных символов, будет только адрес
-                print(f"Thread {thread.num}: {hex(frame.pc())} (символы не найдены)")
+                state["threads"][thread.num] = {
+                    "file": "",
+                    "line": None,
+                    "tid":  thread.ptid[1]
+                }
         except gdb.error as e:
             print(f"Thread {thread.num}: Error - {e}")
+
+    if selected_thread != gdb.selected_thread():
+        selected_thread.switch()
 
     return
 
@@ -656,7 +641,6 @@ def on_breakpoint_created(b):
         "enabled":        b.enabled
     }
 
-    server.send_message_to_all(state_to_string())
 
 def on_breakpoint_modified(b):
     on_breakpoint_created(b)
@@ -665,16 +649,34 @@ def on_breakpoint_deleted(b):
     if b.number in state["breakpoints"]:
         del state["breakpoints"][b.number]
 
-    server.send_message_to_all(state_to_string())
+stop_token = threading.Event()
+
+def loop_wrapper():
+    while not stop_token.is_set():
+        start_time = time.perf_counter()
+
+        elapsed = time.perf_counter() - start_time
+        sleep_time = max(0, 0.030 - elapsed)
+
+        server.send_message_to_all(state_to_string())
+        if stop_token.wait(sleep_time):
+            break
+
+
+server.run_forever(True)
+thread = gdb.Thread(target=loop_wrapper, daemon=True).start()
+
+def on_gdb_exit(code):
+    server.shutdown_gracefully()
+    stop_token.set()
 
 def register_gdb_events():
     gdb.events.breakpoint_created.connect(on_breakpoint_created)
     gdb.events.breakpoint_modified.connect(on_breakpoint_modified)
     gdb.events.breakpoint_deleted.connect(on_breakpoint_deleted)
+    gdb.events.gdb_exiting.connect(on_gdb_exit)
     gdb.events.stop.connect(on_stop)
-
 
 # --- Execution ---
 register_gdb_events()
-server.run_forever(True)
 
