@@ -3,7 +3,6 @@
 from hashlib import sha1
 import logging
 from socket import error as SocketError
-
 import sys
 import struct
 import ssl
@@ -11,10 +10,9 @@ from base64 import b64encode
 import errno
 import threading
 from socketserver import ThreadingMixIn, TCPServer, StreamRequestHandler
-import threading
 
 
-class ThreadWithLoggedException(threading.Thread):
+class ThreadWithLoggedException(gdb.Thread):
     """
     Similar to Thread but will log exceptions to passed logger.
 
@@ -49,22 +47,6 @@ class ThreadWithLoggedException(threading.Thread):
 class WebsocketServerThread(ThreadWithLoggedException):
     """Dummy wrapper to make debug messages a bit more readable"""
     pass
-
-#def state_to_string():
-#    lines = []
-#
-#    for t_num in sorted(state["threads"].keys()):
-#        t = state["threads"][t_num]
-#        line = f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']}"
-#        lines.append(line)
-#
-#
-#    for b_num in sorted(state["breakpoints"].keys()):
-#        b = state["breakpoints"][b_num]
-#        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']}"
-#        lines.append(line)
-#
-#    return "\n".join(lines)
 
 
 logger = logging.getLogger(__name__)
@@ -545,58 +527,103 @@ def try_decode_UTF8(data):
         raise(e)
 
 
-server = WebsocketServer(host='127.0.0.1', port=13254, loglevel=logging.INFO)
+server = WebsocketServer(host='127.0.0.1', port=9000, loglevel=logging.INFO)
 state = {
     "threads": {},      # Key: Thread Num
     "breakpoints": {}   # Key: Breakpoint Num
 }
 
+def state_to_string():
+    lines = []
+
+    for t_num in sorted(state["threads"].keys()):
+        t = state["threads"][t_num]
+        line = f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']}"
+        lines.append(line)
+
+
+    for b_num in sorted(state["breakpoints"].keys()):
+        b = state["breakpoints"][b_num]
+        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+
 def on_stop(b):
-    raw_output = gdb.execute("thread apply all where 1", to_string=True)
+#    raw_output = gdb.execute("thread apply all where 1", to_string=True)
+#
+#    current_thread = None
+#
+#    for line in raw_output.splitlines():
+#        line = line.strip()
+#
+#        if line.startswith("Thread "):
+#            try:
+#                parts = line.split()
+#                t_num = int(parts[1])
+#
+#                lwp_idx = line.find("LWP ")
+#                if lwp_idx != -1:
+#                    tid_str = line[lwp_idx+4:].split(')')[0]
+#                    tid = int(tid_str)
+#                else:
+#                    tid = 0
+#
+#                current_thread = t_num
+#                state["threads"][current_thread] = {
+#                    "file": "",
+#                    "line": None,
+#                    "tid": tid,
+#                }
+#            except (ValueError, IndexError):
+#                current_thread = None
+#            continue
+#
+#        if current_thread is not None and line.startswith("#0"):
+#            at_idx = line.rfind(" at ")
+#            if at_idx != -1:
+#                location = line[at_idx + 4:].strip()
+#                if ":" in location:
+#                    file_path, line_num = location.rsplit(":", 1)
+#                    state["threads"][current_thread]["file"] = file_path
+#                    state["threads"][current_thread]["line"] = line_num
+#
+#            current_thread = None
+#
+#    server.send_message_to_all(state_to_string())
 
-    current_thread = None
-
-    for line in raw_output.splitlines():
-        line = line.strip()
-
-        if line.startswith("Thread "):
-            try:
-                parts = line.split()
-                t_num = int(parts[1])
-
-                lwp_idx = line.find("LWP ")
-                if lwp_idx != -1:
-                    tid_str = line[lwp_idx+4:].split(')')[0]
-                    tid = int(tid_str)
-                else:
-                    tid = 0
-
-                current_thread = t_num
-                state["threads"][current_thread] = {
-                    "file": "",
-                    "line": None,
-                    "tid": tid,
-                }
-            except (ValueError, IndexError):
-                current_thread = None
+    inf = gdb.selected_inferior()
+    for thread in inf.threads():
+        if not thread.is_valid():
+            continue
+            
+        if thread.is_running():
+            print(f"Thread {thread.num}: [RUNNING] - Сначала остановите поток")
             continue
 
-        if current_thread is not None and line.startswith("#0"):
-            at_idx = line.rfind(" at ")
-            if at_idx != -1:
-                location = line[at_idx + 4:].strip()
-                if ":" in location:
-                    file_path, line_num = location.rsplit(":", 1)
-                    state["threads"][current_thread]["file"] = file_path
-                    state["threads"][current_thread]["line"] = line_num
-
-            current_thread = None
+        thread.switch()
+        try:
+            # Берем самый верхний фрейм (текущая позиция)
+            frame = gdb.selected_frame()
+            sal = frame.find_sal()
+            
+            if sal and sal.symtab:
+                filename = sal.symtab.filename
+                line = sal.line
+                print(f"Thread {thread.num}: {filename}:{line}")
+            else:
+                # Если нет отладочных символов, будет только адрес
+                print(f"Thread {thread.num}: {hex(frame.pc())} (символы не найдены)")
+        except gdb.error as e:
+            print(f"Thread {thread.num}: Error - {e}")
 
     return
 
 def get_source_info(b):
     if b.type == gdb.BP_WATCHPOINT or b.type == gdb.BP_HARDWARE_WATCHPOINT or b.type == gdb.BP_READ_WATCHPOINT or b.type == gdb.BP_ACCESS_WATCHPOINT:
-        return None, None
+        return "", ""
 
     if hasattr(b, 'locations') and b.locations:
         source = b.locations[0].source
@@ -629,12 +656,16 @@ def on_breakpoint_created(b):
         "enabled":        b.enabled
     }
 
+    server.send_message_to_all(state_to_string())
+
 def on_breakpoint_modified(b):
     on_breakpoint_created(b)
 
 def on_breakpoint_deleted(b):
     if b.number in state["breakpoints"]:
         del state["breakpoints"][b.number]
+
+    server.send_message_to_all(state_to_string())
 
 def register_gdb_events():
     gdb.events.breakpoint_created.connect(on_breakpoint_created)
@@ -645,10 +676,5 @@ def register_gdb_events():
 
 # --- Execution ---
 register_gdb_events()
-
-
-
-server.run_forever()
-
-#gdb.Thread(target=start_websock_server, daemon=True).start()
+server.run_forever(True)
 
