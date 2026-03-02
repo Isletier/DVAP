@@ -6,17 +6,6 @@ import queue
 import time
 import gdb
 
-
-# --- PRODUCTION DIRTY WORK TO DO LATER ---
-# 1. HEARTBEAT: Add a background thread to broadcast ":\n\n" every 30s 
-#    to keep connections alive and detect dead sockets immediately.
-# 2. CHUNKED ENCODING: If using proxies like Nginx, you may need to 
-#    manually handle 'Transfer-Encoding: chunked'.
-# 3. RECONNECTION LOGIC: Support 'Last-Event-ID' header by keeping 
-#    a small message buffer to replay missed events to clients.
-# 4. RATE LIMITING: Track 'self.client_address' to prevent a single IP 
-#    from exhausting the 6-connection browser limit.
-
 class SSEDispatcher:
     """Thread-safe manager for all connected clients."""
     def __init__(self):
@@ -37,12 +26,7 @@ class SSEDispatcher:
                 self.clients.remove(q)
 
     def broadcast(self, data, event=None, id=None):
-        """Send a formatted SSE message to all subscribers."""
-        msg = ""
-        if id: msg += f"id: {id}\n"
-        if event: msg += f"event: {event}\n"
-        # Dirty Work: Multi-line data must split and prefix each line with 'data: '
-        msg += f"data: {data}\n\n"
+        msg = f"data: {data}\n\n"
         
         encoded_msg = msg.encode('utf-8')
         with self.lock:
@@ -55,26 +39,44 @@ class SSEDispatcher:
 # Global dispatcher instance
 dispatcher = SSEDispatcher()
 
-class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    daemon_threads = True # Ensures threads exit when the main process does
-    allow_reuse_address = True
+class GDBThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
+    def process_request(self, request, client_address):
+        t = gdb.Thread(target=self.process_request_thread, 
+                       args=(request, client_address))
+        t.daemon = self.daemon_threads
+        t.start()
 
 class SSEHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != '/events':
-            self.send_error(404)
-            self.wfile.flush()
-            return
+    def is_valid_request(self):
+        host = self.headers.get('Host', '')
+        if not (host.startswith('127.0.0.1') or host.startswith('localhost')):
+            self.send_error(403, "Access Denied: Invalid Host header")
+            return False
 
+        if self.path != '/events':
+            self.send_error(404, "Not Found")
+            return False
+
+        return True
+
+    def send_sse_headers(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache, no-transform")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers() 
+        self.end_headers()
 
+    def do_GET(self):
+        if not self.is_valid_request():
+            return
+
+        self.send_sse_headers()
         self.wfile.flush()
+
         client_q = dispatcher.subscribe()
         try:
             while True:
@@ -86,26 +88,29 @@ class SSEHandler(http.server.BaseHTTPRequestHandler):
         finally:
             dispatcher.unsubscribe(client_q)
 
+    def do_HEAD(self):
+        if not self.is_valid_request():
+            return
+
+        self.send_sse_headers()
+
 state = {
     "threads": {},      # Key: Thread Num
     "breakpoints": {}   # Key: Breakpoint Num
 }
 
 def state_to_string():
-    lines = []
+    result = ""
 
-    for t_num in sorted(state["threads"].keys()):
+    for t_num in state["threads"].keys():
         t = state["threads"][t_num]
-        line = f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']}"
-        lines.append(line)
+        result += f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']} "
 
-
-    for b_num in sorted(state["breakpoints"].keys()):
+    for b_num in state["breakpoints"].keys():
         b = state["breakpoints"][b_num]
-        line = f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']}"
-        lines.append(line)
+        result += f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']} "
 
-    return "\n".join(lines)
+    return result
 
 def on_stop(b):
     inf = gdb.selected_inferior()
@@ -146,7 +151,7 @@ def on_stop(b):
                     "tid":  thread.ptid[1]
                 }
         except gdb.error as e:
-            print(f"Thread {thread.num}: Error - {e}")
+            print(e)
 
     if selected_thread != gdb.selected_thread():
         selected_thread.switch()
@@ -196,7 +201,6 @@ def on_breakpoint_deleted(b):
     if b.number in state["breakpoints"]:
         del state["breakpoints"][b.number]
 
-stop_token = threading.Event()
 
 def loop_wrapper():
     while not stop_token.is_set():
@@ -210,12 +214,15 @@ def loop_wrapper():
             break
 
 
-server = ThreadedHTTPServer(('127.0.0.1', 9000), SSEHandler)
+stop_token = threading.Event()
+server = GDBThreadedHTTPServer(('127.0.0.1', 9000), SSEHandler)
 gdb.Thread(target=loop_wrapper, daemon=True).start()
 gdb.Thread(target=server.serve_forever, daemon=True).start()
 
 def on_gdb_exit(code):
     stop_token.set()
+    server.shutdown() 
+    server.server_close()
 
 def register_gdb_events():
     gdb.events.breakpoint_created.connect(on_breakpoint_created)
