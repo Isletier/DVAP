@@ -1,6 +1,6 @@
 ## DVAP (debug view adapter protocol)
 
-NOTE: Current implementation is very WIP and partially vibecoded (I really suck at Python). DO NOT USE IT unless you want to participate in its development.
+NOTE: Current implementation is very WIP (I really suck at Python). DO NOT USE IT unless you want to participate in its development.
 
 ## gdb usage:
 
@@ -84,8 +84,4 @@ https://sourceware.org/gdb/current/onlinedocs/gdb.html/Running.html#Running
 https://sourceware.org/gdb/current/onlinedocs/gdb.html/Python-API.html#Python-API
 
 https://microsoft.github.io/debug-adapter-protocol/specification
-
-Special thanks for Johan and his websocket server, directly embeded in this script:
-
-https://github.com/Pithikos/python-websocket-server/tree/master
 
