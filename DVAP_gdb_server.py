@@ -213,6 +213,9 @@ def loop_wrapper():
         if stop_token.wait(sleep_time):
             break
 
+def on_inferior_exited(inferior):
+    state["threads"] = {}
+
 
 stop_token = threading.Event()
 server = GDBThreadedHTTPServer(('127.0.0.1', 9000), SSEHandler)
@@ -228,6 +231,7 @@ def register_gdb_events():
     gdb.events.breakpoint_created.connect(on_breakpoint_created)
     gdb.events.breakpoint_modified.connect(on_breakpoint_modified)
     gdb.events.breakpoint_deleted.connect(on_breakpoint_deleted)
+    gdb.events.exited.connect(on_inferior_exited)
     gdb.events.gdb_exiting.connect(on_gdb_exit)
     gdb.events.stop.connect(on_stop)
 
