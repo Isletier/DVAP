@@ -10,7 +10,7 @@ def run_delve_wrapper():
         # 1. Start Headless Delve Server
         print("[*] Starting headless Delve server on :2345...")
         headless_srv = subprocess.Popen(
-            ["dlv", "--headless", "--listen=:2345", "--api-version=2", "--accept-multiclient", "--check-go-version=false"],
+            ["dlv", "--headless", "--listen=:2345", "--api-version=2", "--accept-multiclient", "--check-go-version=false", "debug"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         processes.append(headless_srv)
