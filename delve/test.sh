@@ -3,7 +3,7 @@
 trap "kill 0" EXIT
 
 # 1. Стартуем сервер
-nohup dlv debug --headless --listen=:2345 --api-version=2 --accept-multiclient --check-go-version=false &
+dlv debug --headless --listen=:2345 --api-version=2 --accept-multiclient --check-go-version=false &
 
 # 2. Ждем, пока порт откроется
 while ! nc -z localhost 2345; do sleep 0.1; done
