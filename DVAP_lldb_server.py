@@ -56,7 +56,8 @@ class SSEHandler(http.server.BaseHTTPRequestHandler):
 
 state = {
     "threads": {},
-    "breakpoints": {}
+    "breakpoints": {},
+    "selected_thread": None  # Add this
 }
 
 def update_lldb_state(debugger):
@@ -89,6 +90,9 @@ def update_lldb_state(debugger):
     process = target.GetProcess()
     new_threads = {}
     if process and process.IsValid() and process.GetState() == lldb.eStateStopped:
+        sel_thread = process.GetSelectedThread()
+        state["selected_thread"] = sel_thread.GetIndexID() if sel_thread.IsValid() else None
+
         for thread in process:
             frame = thread.GetSelectedFrame()
             le = frame.GetLineEntry()
@@ -108,6 +112,9 @@ def update_lldb_state(debugger):
 
 def state_to_string():
     result = ""
+
+    if state["selected_thread"] is not None:
+        result += f"selected:{state['selected_thread']} "
 
     for t_num in state["threads"].keys():
         t = state["threads"][t_num]

@@ -96,11 +96,15 @@ class SSEHandler(http.server.BaseHTTPRequestHandler):
 
 state = {
     "threads": {},      # Key: Thread Num
-    "breakpoints": {}   # Key: Breakpoint Num
+    "breakpoints": {},   # Key: Breakpoint Num
+    "selected_thread": None  # Add this
 }
 
 def state_to_string():
     result = ""
+
+    if state["selected_thread"] is not None:
+        result += f"selected:{state['selected_thread']} "
 
     for t_num in state["threads"].keys():
         t = state["threads"][t_num]
@@ -115,6 +119,8 @@ def state_to_string():
 def on_stop(b):
     inf = gdb.selected_inferior()
     selected_thread = gdb.selected_thread()
+    state["selected_thread"] = selected_thread.num if selected_thread else None
+
     state["threads"] = {}
     for thread in inf.threads():
         if not thread.is_valid():
