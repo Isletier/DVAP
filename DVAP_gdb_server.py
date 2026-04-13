@@ -100,19 +100,22 @@ state = {
     "selected_thread": None  # Add this
 }
 
+FS = ";;"   # field separator (within a record)
+RS = "||"   # record separator (between records)
+
 def state_to_string():
     result = ""
 
     if state["selected_thread"] is not None:
-        result += f"selected:{state['selected_thread']} "
+        result += f"selected{FS}{state['selected_thread']}{RS}"
 
     for t_num in state["threads"].keys():
         t = state["threads"][t_num]
-        result += f"thread:{t_num}:{t['file']}:{t['line']}:{t['tid']} "
+        result += f"thread{FS}{t_num}{FS}{t['file']}{FS}{t['line']}{FS}{t['tid']}{RS}"
 
     for b_num in state["breakpoints"].keys():
         b = state["breakpoints"][b_num]
-        result += f"bp:{b_num}:{b['file']}:{b['line']}:{b['type']}:{b['location']}:{b['nonconditional']}:{b['enabled']} "
+        result += f"bp{FS}{b_num}{FS}{b['file']}{FS}{b['line']}{FS}{b['type']}{FS}{b['location']}{FS}{b['nonconditional']}{FS}{b['enabled']}{RS}"
 
     return result
 
