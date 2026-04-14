@@ -201,8 +201,74 @@ class DVAPServer:
         return os.path.join(directory, filename) if directory else filename
 
 
+def _dvap_start_cmd(debugger, command, exe_ctx, result, internal_dict):
+    path = getattr(lldb, '_dvap_script_path', None)
+    if path is None:
+        result.AppendMessage("[DVAP] Script path unknown.")
+        return
+    debugger.HandleCommand(f'command script import --allow-reload "{path}"')
+
+
+def _dvap_stop_cmd(debugger, command, exe_ctx, result, internal_dict):
+    inst = getattr(lldb, '_dvap_instance', None)
+    if inst is None:
+        result.AppendMessage("[DVAP] No server running.")
+        return
+    inst.shutdown()
+    lldb._dvap_instance = None
+    result.AppendMessage("[DVAP] Server stopped. Re-source the script to restart.")
+
+
+def _dvap_show_cmd(debugger, command, exe_ctx, result, internal_dict):
+    inst   = getattr(lldb, '_dvap_instance', None)
+    status = "running" if inst is not None else "stopped"
+    result.AppendMessage(f"[DVAP] Status: {status}")
+    result.AppendMessage(f"[DVAP] Port:   {lldb._dvap_port}")
+
+
+def _dvap_set_cmd(debugger, command, exe_ctx, result, internal_dict):
+    parts = command.strip().split()
+    if len(parts) == 2 and parts[0] == 'port':
+        try:
+            lldb._dvap_port = int(parts[1])
+            result.AppendMessage(
+                f"[DVAP] Port set to {lldb._dvap_port}. Re-source the script to apply."
+            )
+            return
+        except ValueError:
+            pass
+    result.AppendMessage("Usage: dvap-set port <N>")
+
+
+def _dvap_help_cmd(debugger, command, exe_ctx, result, internal_dict):
+    result.AppendMessage(
+        "DVAP – Debug View Adapter Protocol (LLDB)\n"
+        "\n"
+        "Commands:\n"
+        "  dvap-help            Show this message\n"
+        "  dvap-show            Show server status and port\n"
+        "  dvap-start           Start or restart the server\n"
+        "  dvap-stop            Stop the server\n"
+        "  dvap-set port <N>    Change the port (dvap-start to apply)\n"
+        "\n"
+        "First source:\n"
+        "  command script import <path/to/DVAP_lldb_server.py>\n"
+        "\n"
+        "SSE endpoint:  curl http://localhost:<port>/events"
+    )
+
+
 def __lldb_init_module(debugger, internal_dict):
+    lldb._dvap_script_path = os.path.abspath(__file__)
+
     if getattr(lldb, '_dvap_instance', None) is not None:
         print("[DVAP] Re-sourcing: shutting down previous instance...")
         lldb._dvap_instance.shutdown()
     lldb._dvap_instance = DVAPServer(lldb._dvap_port, debugger)
+
+    for name in ('dvap-start', 'dvap-stop', 'dvap-show', 'dvap-set', 'dvap-help'):
+        fn = name.replace('-', '_')
+        debugger.HandleCommand(
+            f'command script add --overwrite -f {__name__}._{fn}_cmd {name}'
+        )
+

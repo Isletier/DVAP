@@ -2,6 +2,7 @@ import http.server
 import socketserver
 import threading
 import queue
+import os
 import gdb
 
 # Created once on the gdb module so the value survives re-sourcing.
@@ -296,9 +297,97 @@ class DVAPServer:
             self._state["selected_thread"] = None
 
 
+gdb._dvap_script_path = os.path.abspath(__file__)
+
 if getattr(gdb, '_dvap_instance', None) is not None:
     print("[DVAP] Re-sourcing: shutting down previous instance...")
     gdb._dvap_instance.shutdown()
 
 gdb._dvap_instance = DVAPServer(gdb._dvap_port_param.value)
+
+
+# gdb.Command cannot be unregistered, so guard against re-source creating
+# a duplicate. The invoke method reads gdb._dvap_instance at call time.
+
+if not hasattr(gdb, '_dvap_start_cmd'):
+    class _DVAPStartCommand(gdb.Command):
+        """Start or restart the DVAP server."""
+        def __init__(self):
+            super().__init__('dvap-start', gdb.COMMAND_NONE)
+        def invoke(self, arg, from_tty):
+            path = getattr(gdb, '_dvap_script_path', None)
+            if path is None:
+                print("[DVAP] Script path unknown.")
+                return
+            with open(path) as f:
+                exec(compile(f.read(), path, 'exec'), {'__file__': path})
+    gdb._dvap_start_cmd = _DVAPStartCommand()
+
+if not hasattr(gdb, '_dvap_stop_cmd'):
+    class _DVAPStopCommand(gdb.Command):
+        """Stop the DVAP SSE server. Re-source the script to restart it."""
+        def __init__(self):
+            super().__init__('dvap-stop', gdb.COMMAND_NONE)
+        def invoke(self, arg, from_tty):
+            inst = getattr(gdb, '_dvap_instance', None)
+            if inst is None:
+                print("[DVAP] No server running.")
+                return
+            inst.shutdown()
+            gdb._dvap_instance = None
+            print("[DVAP] Server stopped. Re-source the script to restart.")
+    gdb._dvap_stop_cmd = _DVAPStopCommand()
+
+if not hasattr(gdb, '_dvap_show_cmd'):
+    class _DVAPShowCommand(gdb.Command):
+        """Show DVAP server status and configuration."""
+        def __init__(self):
+            super().__init__('dvap-show', gdb.COMMAND_NONE)
+        def invoke(self, arg, from_tty):
+            inst   = getattr(gdb, '_dvap_instance', None)
+            status = "running" if inst is not None else "stopped"
+            print(f"[DVAP] Status: {status}")
+            print(f"[DVAP] Port:   {gdb._dvap_port_param.value}")
+    gdb._dvap_show_cmd = _DVAPShowCommand()
+
+if not hasattr(gdb, '_dvap_set_cmd'):
+    class _DVAPSetCommand(gdb.Command):
+        """Set DVAP configuration. Usage: dvap-set port <N>"""
+        def __init__(self):
+            super().__init__('dvap-set', gdb.COMMAND_NONE)
+        def invoke(self, arg, from_tty):
+            parts = arg.strip().split()
+            if len(parts) == 2 and parts[0] == 'port':
+                try:
+                    gdb._dvap_port_param.value = int(parts[1])
+                    print(f"[DVAP] Port set to {gdb._dvap_port_param.value}."
+                          " Re-source the script to apply.")
+                    return
+                except ValueError:
+                    pass
+            print("Usage: dvap-set port <N>")
+    gdb._dvap_set_cmd = _DVAPSetCommand()
+
+if not hasattr(gdb, '_dvap_help_cmd'):
+    class _DVAPHelpCommand(gdb.Command):
+        """Show DVAP usage information."""
+        def __init__(self):
+            super().__init__('dvap-help', gdb.COMMAND_NONE)
+        def invoke(self, arg, from_tty):
+            print(
+                "DVAP – Debug View Adapter Protocol (GDB)\n"
+                "\n"
+                "Commands:\n"
+                "  dvap-help            Show this message\n"
+                "  dvap-show            Show server status and port\n"
+                "  dvap-start           Start or restart the server\n"
+                "  dvap-stop            Stop the server\n"
+                "  dvap-set port <N>    Change the port (dvap-start to apply)\n"
+                "\n"
+                "First source:\n"
+                "  source <path/to/DVAP_gdb_server.py>\n"
+                "\n"
+                "SSE endpoint:  curl http://localhost:<port>/events"
+            )
+    gdb._dvap_help_cmd = _DVAPHelpCommand()
 
