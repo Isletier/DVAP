@@ -230,7 +230,7 @@ class DVAPServer:
                     sal   = frame.find_sal()
                     if sal and sal.symtab:
                         new_threads[thread.num] = {
-                            "file": sal.symtab.filename,
+                            "file": sal.symtab.fullname(),
                             "line": sal.line,
                             "tid":  thread.ptid[1],
                         }
@@ -258,17 +258,28 @@ class DVAPServer:
         if b.type in (gdb.BP_WATCHPOINT, gdb.BP_HARDWARE_WATCHPOINT,
                       gdb.BP_READ_WATCHPOINT, gdb.BP_ACCESS_WATCHPOINT):
             return "", ""
+
+        # 1. Try to get the absolute path from resolved locations
         if hasattr(b, 'locations') and b.locations:
-            source = b.locations[0].source
-            if source:
-                return source[0], source[1]  # (fullname, line)
+            for loc in b.locations:
+                if not loc.enabled: continue
+                
+                # Use find_pc_line to get a symtab from the location address
+                # This is the most reliable way to access .fullname()
+                sal = gdb.find_pc_line(loc.address)
+                if sal and sal.symtab:
+                    return sal.symtab.fullname(), sal.line
+
+        # 2. Fallback for pending breakpoints (not yet resolved)
         if b.location:
             try:
+                # decode_line helps resolve strings like "main.zig:10"
                 sals = gdb.decode_line(b.location)[1]
-                if sals:
+                if sals and sals[0].symtab:
                     return sals[0].symtab.fullname(), sals[0].line
             except Exception:
                 pass
+
         return "", ""
 
     def _on_bp_created(self, b):
