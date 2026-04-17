@@ -196,9 +196,9 @@ class DVAPServer:
         with self._lock:
             result = ""
             if self._state["selected_thread"] is not None:
-                result += f"selected{FS}{self._state['selected_thread']}{RS}"
+                result += f"selected{FS}{self._state['selected_thread']}{FS}{'t'}{RS}"
             for t_num, t in self._state["threads"].items():
-                result += f"thread{FS}{t_num}{FS}{t['file']}{FS}{t['line']}{FS}{t['tid']}{RS}"
+                result += f"thread{FS}{t_num}{FS}{'t'}{FS}{t['file']}{FS}{t['line']}{FS}{t['tid']}{RS}"
             for b_num, b in self._state["breakpoints"].items():
                 result += (f"bp{FS}{b_num}{FS}{b['file']}{FS}{b['line']}"
                            f"{FS}{b['nonconditional']}{FS}{b['enabled']}{RS}")

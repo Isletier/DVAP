@@ -178,13 +178,13 @@ class DVAPServer:
         if process and process.IsValid() and process.GetState() == lldb.eStateStopped:
             sel = process.GetSelectedThread()
             if sel.IsValid():
-                result += f"selected{FS}{sel.GetIndexID()}{RS}"
+                result += f"selected{FS}{sel.GetIndexID()}{FS}{'t'}{RS}"
             for thread in process:
                 frame     = thread.GetSelectedFrame()
                 le        = frame.GetLineEntry() if frame.IsValid() else None
                 file_path = self._file_path(le.GetFileSpec()) if le and le.IsValid() else ""
                 line      = le.GetLine() if le and le.IsValid() else 0
-                result += (f"thread{FS}{thread.GetIndexID()}{FS}{file_path}"
+                result += (f"thread{FS}{thread.GetIndexID()}{FS}{'t'}{FS}{file_path}"
                            f"{FS}{line}{FS}{thread.GetThreadID()}{RS}")
 
         return result
