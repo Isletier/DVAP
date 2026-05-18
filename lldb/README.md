@@ -83,7 +83,7 @@ Navigate execution:
 
 How to use the editor and debugger at the same time: split your terminal with tmux, your desktop environment, or Vim's terminal mode. The editor observes the session passively — you only ever type into the debugger.
 
-If you want a richer in-terminal UI on the lldb side, lldbinit is a heavily extended `.lldbinit` configuration that adds formatted output, convenience commands, and better disassembly display. It works entirely through lldb's scripting layer and coexists with DVAP without conflicts.
+If you want a richer in-terminal UI on the lldb side, lldbinit is a heavily extended `~/.lldbinit` configuration that adds formatted output, convenience commands, and better disassembly display. It works entirely through lldb's scripting layer and coexists with DVAP without conflicts.
 
 https://github.com/gdbinit/lldbinit
 

@@ -1,7 +1,5 @@
 ## DVAP (Debug View Adapter Protocol)
 
-NOTE: Current implementation is still very WIP, but i try my best to make it better.
-
 ## About the concept
 
 REPLs are cool, but no matter how well their UI is implemented, they suck at one particular thing: displaying text and, as a consequence, execution flow.
@@ -16,7 +14,7 @@ This minimalistic interface can conform to any combination of editor/debugger/la
 
 - [GDB](gdb/)
 - [LLDB](lldb/)
-- [Go / Dvelve](dvelve/) — fork of Delve with DVAP support
+- [Go / Dvelve](https://github.com/Isletier/dvelve/tree/dvelve) — fork of Delve with DVAP support
 
 ## Clients
 

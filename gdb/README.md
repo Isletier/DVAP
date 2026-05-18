@@ -81,7 +81,7 @@ Pressing Enter on an empty line re-runs the previous command, which is useful fo
 gdb$ step 5
 ```
 
-How to use the editor and debugger at the same time: split your terminal with tmux, your desktop environment, or Vim's terminal mode. The editor observes the session passively — you only ever type into the debugger.
+How to use the editor and debugger at the same time: split your terminal with tmux or your desktop environment. The editor observes the session passively — you only ever type into the debugger.
 
 If you want a richer in-terminal UI on the gdb side, gdb-dashboard slots in cleanly. It renders threads, breakpoints, source context, and registers as a live dashboard inside gdb without touching the Python API that DVAP hooks into, so the two coexist without conflicts and together feel close to a full IDE setup.
 
